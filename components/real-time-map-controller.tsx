@@ -33,6 +33,7 @@ export function RealTimeMapController({ mapComponent, onNewSighting, onNewCase }
   const lastSightingIdRef = useRef<string | null>(null)
   const lastCaseIdRef = useRef<string | null>(null)
   const reconnectingRef = useRef<boolean>(false)
+  const cleanupFnRef = useRef<(() => void) | undefined>(undefined)
 
   // Constants for time formatting
   const SECONDS_PER_MINUTE = 60
@@ -40,11 +41,11 @@ export function RealTimeMapController({ mapComponent, onNewSighting, onNewCase }
 
   // Init & teardown logic
   useEffect(() => {
-    let cleanup: (() => void) | undefined
-
     const initialize = async () => {
       try {
-        cleanup = await initializeRealTimeService()
+        const cleanupFn = await initializeRealTimeService()
+        // Store the cleanup function in a ref to avoid issues with stale closures
+        cleanupFnRef.current = cleanupFn
         setIsInitialized(true)
 
         // Check if we're in offline mode
@@ -63,9 +64,15 @@ export function RealTimeMapController({ mapComponent, onNewSighting, onNewCase }
 
     initialize()
 
+    // Cleanup function
     return () => {
-      if (typeof cleanup === "function") {
-        cleanup()
+      // Safely call the cleanup function if it exists and is a function
+      if (cleanupFnRef.current && typeof cleanupFnRef.current === "function") {
+        try {
+          cleanupFnRef.current()
+        } catch (error) {
+          console.error("Error during cleanup:", error)
+        }
       }
       setIsInitialized(false)
     }
@@ -143,10 +150,18 @@ export function RealTimeMapController({ mapComponent, onNewSighting, onNewCase }
     toast.info("Attempting to reconnect...", { duration: 2000 })
 
     try {
-      const cleanup = await initializeRealTimeService()
-      if (typeof cleanup === "function") {
-        // Store the new cleanup function somewhere if needed
+      // Clean up existing connection if there is one
+      if (cleanupFnRef.current && typeof cleanupFnRef.current === "function") {
+        try {
+          cleanupFnRef.current()
+        } catch (error) {
+          console.error("Error during cleanup before reconnect:", error)
+        }
       }
+
+      // Initialize a new connection
+      const newCleanup = await initializeRealTimeService()
+      cleanupFnRef.current = newCleanup
 
       if (useRealTimeStore.getState().isConnected) {
         toast.success("Reconnection successful")

@@ -643,7 +643,7 @@ async function loadMockData() {
 const RECONNECTION_INTERVAL = 60000 // 1 minute
 
 // Initialize real-time service
-export async function initializeRealTimeService(): Promise<() => void> {
+export async function initializeRealTimeService(): Promise<(() => void) | undefined> {
   const store = useRealTimeStore.getState()
   store.setLoading(true)
   store.setLastConnectionAttempt(new Date().toISOString())
@@ -739,11 +739,11 @@ export async function initializeRealTimeService(): Promise<() => void> {
     }
 
     // Try to load from localStorage first if available
-    const cachedData = localStorage.getItem("deeptrack-real-time-storage")
     let hasCache = false
 
-    if (cachedData) {
-      try {
+    try {
+      const cachedData = localStorage.getItem("deeptrack-real-time-storage")
+      if (cachedData) {
         const parsedData = JSON.parse(cachedData)
         if (parsedData.state) {
           console.log("Using cached data while fetching from Supabase")
@@ -763,9 +763,9 @@ export async function initializeRealTimeService(): Promise<() => void> {
             parsedData.state.weatherUpdates.forEach((update: WeatherUpdate) => store.addWeatherUpdate(update))
           }
         }
-      } catch (error) {
-        console.error("Error parsing cached data:", error)
       }
+    } catch (error) {
+      console.error("Error parsing cached data:", error)
     }
 
     // Fetch initial data
@@ -782,49 +782,55 @@ export async function initializeRealTimeService(): Promise<() => void> {
     }
 
     // Set up real-time subscriptions
-    const rodentChannel = supabase
-      .channel("rodent-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "rodent_sightings" }, (payload: any) => {
-        const sighting: RodentSighting = payload.new
-        store.addRodentSighting(sighting)
+    let rodentChannel, lassaChannel, weatherChannel
 
-        // Generate alert for new sighting
-        store.addAlert({
-          id: `alert-rodent-${Date.now()}`,
-          type: "info",
-          message: `New rodent sighting detected in ${sighting.state || "unknown location"}`,
-          timestamp: new Date().toISOString(),
-          location: sighting.state,
-          acknowledged: false,
+    try {
+      rodentChannel = supabase
+        .channel("rodent-changes")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "rodent_sightings" }, (payload: any) => {
+          const sighting: RodentSighting = payload.new
+          store.addRodentSighting(sighting)
+
+          // Generate alert for new sighting
+          store.addAlert({
+            id: `alert-rodent-${Date.now()}`,
+            type: "info",
+            message: `New rodent sighting detected in ${sighting.state || "unknown location"}`,
+            timestamp: new Date().toISOString(),
+            location: sighting.state,
+            acknowledged: false,
+          })
         })
-      })
-      .subscribe()
+        .subscribe()
 
-    const lassaChannel = supabase
-      .channel("lassa-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "lassa_cases" }, (payload: any) => {
-        const lassaCase: LassaCase = payload.new
-        store.addLassaCase(lassaCase)
+      lassaChannel = supabase
+        .channel("lassa-changes")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "lassa_cases" }, (payload: any) => {
+          const lassaCase: LassaCase = payload.new
+          store.addLassaCase(lassaCase)
 
-        // Generate critical alert for new Lassa case
-        store.addAlert({
-          id: `alert-lassa-${Date.now()}`,
-          type: "critical",
-          message: `New Lassa fever case reported in ${lassaCase.state || "unknown location"}`,
-          timestamp: new Date().toISOString(),
-          location: lassaCase.state,
-          acknowledged: false,
+          // Generate critical alert for new Lassa case
+          store.addAlert({
+            id: `alert-lassa-${Date.now()}`,
+            type: "critical",
+            message: `New Lassa fever case reported in ${lassaCase.state || "unknown location"}`,
+            timestamp: new Date().toISOString(),
+            location: lassaCase.state,
+            acknowledged: false,
+          })
         })
-      })
-      .subscribe()
+        .subscribe()
 
-    const weatherChannel = supabase
-      .channel("weather-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "weather_updates" }, (payload: any) => {
-        const weather: WeatherUpdate = payload.new
-        store.addWeatherUpdate(weather)
-      })
-      .subscribe()
+      weatherChannel = supabase
+        .channel("weather-changes")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "weather_updates" }, (payload: any) => {
+          const weather: WeatherUpdate = payload.new
+          store.addWeatherUpdate(weather)
+        })
+        .subscribe()
+    } catch (error) {
+      console.error("Error setting up real-time subscriptions:", error)
+    }
 
     // Set connected status
     store.setConnected(true)
@@ -833,9 +839,9 @@ export async function initializeRealTimeService(): Promise<() => void> {
     // Return cleanup function
     return () => {
       try {
-        supabase.removeChannel(rodentChannel)
-        supabase.removeChannel(lassaChannel)
-        supabase.removeChannel(weatherChannel)
+        if (rodentChannel) supabase.removeChannel(rodentChannel)
+        if (lassaChannel) supabase.removeChannel(lassaChannel)
+        if (weatherChannel) supabase.removeChannel(weatherChannel)
       } catch (error) {
         console.error("Error during cleanup:", error)
       }

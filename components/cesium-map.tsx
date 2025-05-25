@@ -125,15 +125,36 @@ export function CesiumMap() {
         return
       }
 
-      // Fetch Cesium key from server
+      // Fetch Cesium key from server with better error handling
+      let cesiumKey
       try {
-        const cesiumKey = await getCesiumKey()
+        console.log("Fetching Cesium key from server...")
+        cesiumKey = await getCesiumKey()
+        console.log("Cesium key fetched successfully")
+
         // Set access token
         Cesium.Ion.defaultAccessToken = cesiumKey
       } catch (error) {
         console.error("Failed to fetch Cesium key:", error)
-        setCesiumError("Failed to fetch Cesium key. Using fallback map.")
-        return
+
+        // Check if we have a fallback key in local storage from previous successful fetch
+        const fallbackKey = localStorage.getItem("cesium_key_fallback")
+        if (fallbackKey) {
+          console.log("Using fallback Cesium key from local storage")
+          Cesium.Ion.defaultAccessToken = fallbackKey
+        } else {
+          setCesiumError(`Failed to fetch Cesium key: ${error instanceof Error ? error.message : String(error)}`)
+          return
+        }
+      }
+
+      // If we successfully used the key, store it as fallback for future sessions
+      if (cesiumKey) {
+        try {
+          localStorage.setItem("cesium_key_fallback", cesiumKey)
+        } catch (e) {
+          // Ignore storage errors
+        }
       }
 
       // Create a basic viewer with minimal options
@@ -291,6 +312,17 @@ export function CesiumMap() {
                 }
                 return 1.0
               }, false),
+            },
+            label: {
+              text: colony.colony_id,
+              font: "14px sans-serif",
+              fillColor: Cesium.Color.WHITE,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              outlineWidth: 2,
+              outlineColor: Cesium.Color.BLACK,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              pixelOffset: new Cesium.Cartesian2(0, -36),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
             },
             label: {
               text: colony.colony_id,
